@@ -101,7 +101,7 @@ test("second live repo is counted on the state line", () => {
     1
   )
   assert.ok(activity)
-  assert.match(activity.state, /\+1/)
+  assert.match(activity.state, /\+1 repo/)
 })
 
 test("orca down clears presence", () => {

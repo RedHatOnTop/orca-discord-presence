@@ -105,7 +105,7 @@ function whereLine(agents: AgentRow[]): string {
   const parts = [repo]
   if (branch) parts.push(branch)
   if (host) parts.push(host)
-  if (extra > 0) parts.push(`+${extra}`)
+  if (extra > 0) parts.push(extra === 1 ? "+1 repo" : `+${extra} repos`)
   return parts.join(" · ")
 }
 
