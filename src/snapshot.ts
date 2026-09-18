@@ -17,18 +17,21 @@ function str(value: unknown): string {
 
 export function parseWorktreePs(payload: unknown): FleetSnapshot {
   const root = asRecord(payload)
-  if (!root) return { orcaRunning: false, agents: [] }
+  if (!root) return { orcaRunning: false, agents: [], worktreeCount: 0 }
 
   const result = asRecord(root.result)
   const list = (result?.worktrees ?? root.worktrees) as unknown
-  if (!Array.isArray(list)) return { orcaRunning: true, agents: [] }
+  if (!Array.isArray(list)) return { orcaRunning: true, agents: [], worktreeCount: 0 }
 
   const agents: AgentRow[] = []
+  let worktreeCount = 0
   for (const item of list) {
     const wt = asRecord(item)
     if (!wt) continue
+    worktreeCount += 1
     const repo = str(wt.repo) || str(wt.displayName) || "workspace"
     const hostId = str(wt.hostId) || "local"
+    const branch = str(wt.branch) || str(wt.displayName)
     const nested = wt.agents
     if (Array.isArray(nested) && nested.length > 0) {
       for (const raw of nested) {
@@ -38,17 +41,18 @@ export function parseWorktreePs(payload: unknown): FleetSnapshot {
           state: str(agent.state) || str(wt.status) || "idle",
           agentType: str(agent.agentType) || "agent",
           repo,
-          hostId
+          hostId,
+          branch
         })
       }
       continue
     }
     const status = str(wt.status)
     if (status && status !== "inactive") {
-      agents.push({ state: status, agentType: "agent", repo, hostId })
+      agents.push({ state: status, agentType: "agent", repo, hostId, branch })
     }
   }
-  return { orcaRunning: true, agents }
+  return { orcaRunning: true, agents, worktreeCount }
 }
 
 export function runOrcaJson(cli: string, args: string[], timeoutMs = 8000): Promise<unknown> {
@@ -87,6 +91,6 @@ export async function readFleet(cli: string): Promise<FleetSnapshot> {
     const payload = await runOrcaJson(cli, ["worktree", "ps", "--limit", "40", "--json"])
     return parseWorktreePs(payload)
   } catch {
-    return { orcaRunning: false, agents: [] }
+    return { orcaRunning: false, agents: [], worktreeCount: 0 }
   }
 }

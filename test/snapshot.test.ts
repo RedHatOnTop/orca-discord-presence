@@ -11,6 +11,7 @@ test("parses orca worktree ps envelope", () => {
           repo: "remote-agent",
           hostId: "local",
           status: "working",
+          branch: "refs/heads/feat/x",
           agents: [
             { state: "working", agentType: "grok" },
             { state: "working", agentType: "grok" }
@@ -21,9 +22,11 @@ test("parses orca worktree ps envelope", () => {
     }
   })
   assert.equal(snap.orcaRunning, true)
+  assert.equal(snap.worktreeCount, 2)
   assert.equal(snap.agents.length, 2)
   assert.equal(snap.agents[0].repo, "remote-agent")
   assert.equal(snap.agents[0].agentType, "grok")
+  assert.equal(snap.agents[0].branch, "refs/heads/feat/x")
 })
 
 test("falls back to worktree status when agents array is empty", () => {

@@ -3,11 +3,13 @@ export type AgentRow = {
   agentType: string
   repo: string
   hostId: string
+  branch: string
 }
 
 export type FleetSnapshot = {
   orcaRunning: boolean
   agents: AgentRow[]
+  worktreeCount: number
 }
 
 export type DiscordActivity = {
@@ -52,37 +54,59 @@ function clip(value: string, max = 128): string {
   return `${value.slice(0, max - 1)}…`
 }
 
-function uniqueTypes(agents: AgentRow[]): string[] {
-  const counts = new Map<string, number>()
-  for (const agent of agents) {
-    const name = (agent.agentType || "agent").trim() || "agent"
-    counts.set(name, (counts.get(name) ?? 0) + 1)
-  }
-  return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([name]) => name)
+export function shortBranch(branch: string): string {
+  return branch.replace(/^refs\/heads\//, "").trim()
 }
 
-function typeLabel(types: string[]): string {
-  if (types.length === 0) return "agent"
-  if (types.length === 1) return types[0]
-  if (types.length === 2) return `${types[0]}, ${types[1]}`
-  return `${types[0]}, ${types[1]} +${types.length - 2}`
+function countBy(values: string[]): [string, number][] {
+  const counts = new Map<string, number>()
+  for (const raw of values) {
+    const key = raw.trim() || "agent"
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+}
+
+/** `grok ×2 · copilot` — counts live in the string, so details can drop the extra "N live". */
+export function roster(agents: AgentRow[]): string {
+  const parts = countBy(agents.map((a) => a.agentType || "agent")).map(([name, n]) =>
+    n > 1 ? `${name} ×${n}` : name
+  )
+  if (parts.length === 0) return "agent"
+  if (parts.length <= 3) return parts.join(" · ")
+  return `${parts[0]} · ${parts[1]} · +${parts.length - 2}`
 }
 
 function primaryRepo(agents: AgentRow[]): string {
-  const live = agents.filter((a) => classify(a.state) !== "idle")
-  const pool = live.length > 0 ? live : agents
-  const counts = new Map<string, number>()
-  for (const agent of pool) {
-    const repo = agent.repo.trim() || "workspace"
-    counts.set(repo, (counts.get(repo) ?? 0) + 1)
-  }
-  const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1])
+  const ranked = countBy(agents.map((a) => a.repo || "workspace"))
   return ranked[0]?.[0] ?? "Orca ADE"
+}
+
+function primaryBranch(agents: AgentRow[], repo: string): string | null {
+  const ranked = countBy(agents.map((a) => shortBranch(a.branch)).filter((b) => b.length > 0 && b !== repo))
+  return ranked[0]?.[0] ?? null
+}
+
+function extraRepoCount(agents: AgentRow[], repo: string): number {
+  return new Set(agents.map((a) => a.repo || "workspace")).size - (repo ? 1 : 0)
 }
 
 function remoteHint(agents: AgentRow[]): string | null {
   const remote = agents.find((a) => a.hostId && a.hostId !== "local")
   return remote ? remote.hostId : null
+}
+
+function whereLine(agents: AgentRow[]): string {
+  if (agents.length === 0) return "Orca ADE"
+  const repo = primaryRepo(agents)
+  const branch = primaryBranch(agents, repo)
+  const host = remoteHint(agents)
+  const extra = extraRepoCount(agents, repo)
+  const parts = [repo]
+  if (branch) parts.push(branch)
+  if (host) parts.push(host)
+  if (extra > 0) parts.push(`+${extra}`)
+  return parts.join(" · ")
 }
 
 const SMALL_KEY: Record<Kind, string> = {
@@ -108,25 +132,27 @@ export function buildActivity(
   const working = snapshot.agents.filter((a) => classify(a.state) === "working")
   const live = [...waiting, ...working]
   const kind: Kind = waiting.length > 0 ? "waiting" : working.length > 0 ? "working" : "idle"
-
-  const repo = snapshot.agents.length > 0 ? primaryRepo(snapshot.agents) : "Orca ADE"
-  const host = remoteHint(live.length > 0 ? live : snapshot.agents)
-  const where = host ? `${repo} · ${host}` : repo
+  const place = whereLine(live.length > 0 ? live : snapshot.agents)
 
   let details: string
   let state: string
   if (kind === "waiting") {
-    details = `needs you · ${waiting.length} waiting`
-    const rest = typeLabel(uniqueTypes(waiting.length > 0 ? waiting : live))
-    state = working.length > 0 ? `${rest} · ${working.length} live` : rest
+    details = `needs you · ${roster(waiting)}`
+    state = working.length > 0 ? `${place} · ${working.length} working` : place
   } else if (kind === "working") {
-    const n = working.length
-    details = `${n} live · ${typeLabel(uniqueTypes(working))}`
-    state = where
+    details = roster(working)
+    state = place
   } else {
-    details = "Idle"
-    state = where
+    details = snapshot.worktreeCount > 1 ? `Idle · ${snapshot.worktreeCount} worktrees` : "Idle"
+    state = place
   }
+
+  const hoverBits = [
+    "Orca ADE",
+    working.length > 0 ? `${working.length} working` : null,
+    waiting.length > 0 ? `${waiting.length} waiting` : null,
+    snapshot.worktreeCount > 0 ? `${snapshot.worktreeCount} worktrees` : null
+  ].filter((bit): bit is string => bit !== null)
 
   return {
     type: 0,
@@ -135,7 +161,7 @@ export function buildActivity(
     timestamps: { start: startedAtSec },
     assets: {
       large_image: largeImage,
-      large_text: "Orca ADE",
+      large_text: clip(hoverBits.join(" · "), 128),
       small_image: SMALL_KEY[kind],
       small_text: SMALL_TEXT[kind]
     }
