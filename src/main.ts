@@ -1,9 +1,10 @@
-import { buildActivity } from "./activity.ts"
+import { buildActivity, DEFAULT_ASSET_BASE, featuredRepo, focusPool } from "./activity.ts"
 import { DiscordIpc } from "./ipc.ts"
 import { readFleet } from "./snapshot.ts"
 
 const DEFAULT_CLIENT_ID = "1545653843239374848"
 const POLL_MS = 15_000
+const HEARTBEAT_TICKS = 4
 
 function log(msg: string, extra?: unknown): void {
   const line = extra === undefined ? msg : `${msg} ${JSON.stringify(extra)}`
@@ -18,7 +19,8 @@ async function tick(
   ipc: DiscordIpc,
   cli: string,
   startedAt: number,
-  last: { current: unknown }
+  last: { current: unknown; repo: string | null; ticks: number },
+  assetBase: string
 ): Promise<void> {
   if (!ipc.connected) {
     const path = await ipc.connect()
@@ -26,10 +28,16 @@ async function tick(
     last.current = undefined
   }
   const fleet = await readFleet(cli)
-  const activity = buildActivity(fleet, startedAt)
-  if (sameActivity(activity, last.current)) return
+  const activity = buildActivity(fleet, startedAt, {
+    previousRepo: last.repo,
+    assetBase
+  })
+  last.ticks += 1
+  const heartbeat = last.ticks % HEARTBEAT_TICKS === 0
+  if (!heartbeat && sameActivity(activity, last.current)) return
   await ipc.setActivity(activity)
   last.current = activity
+  last.repo = activity ? featuredRepo(focusPool(fleet), last.repo) : null
   log("presence", activity ? { details: activity.details, state: activity.state } : { details: null })
 }
 
@@ -37,20 +45,21 @@ async function main(): Promise<void> {
   const once = process.argv.includes("--once")
   const clientId = process.env.ORCA_DISCORD_CLIENT_ID || DEFAULT_CLIENT_ID
   const cli = process.env.ORCA_CLI || "orca-ide"
+  const assetBase = process.env.ORCA_PRESENCE_ASSET_BASE || DEFAULT_ASSET_BASE
   const startedAt = Math.floor(Date.now() / 1000)
   const ipc = new DiscordIpc(clientId)
-  const last = { current: undefined as unknown }
+  const last = { current: undefined as unknown, repo: null as string | null, ticks: 0 }
 
   const run = async () => {
     try {
-      await tick(ipc, cli, startedAt, last)
+      await tick(ipc, cli, startedAt, last, assetBase)
     } catch (err) {
       ipc.close()
       log("tick failed", { err: err instanceof Error ? err.message : String(err) })
     }
   }
 
-  process.on("SIGINT", async () => {
+  const shutdown = async () => {
     try {
       await ipc.clear()
     } catch {
@@ -58,16 +67,9 @@ async function main(): Promise<void> {
     }
     ipc.close()
     process.exit(0)
-  })
-  process.on("SIGTERM", async () => {
-    try {
-      await ipc.clear()
-    } catch {
-      /* ignore */
-    }
-    ipc.close()
-    process.exit(0)
-  })
+  }
+  process.on("SIGINT", shutdown)
+  process.on("SIGTERM", shutdown)
 
   await run()
   if (once) {

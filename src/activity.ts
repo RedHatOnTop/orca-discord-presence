@@ -17,6 +17,7 @@ export type DiscordActivity = {
   details: string
   state: string
   timestamps: { start: number }
+  status_display_type: number
   assets: {
     large_image: string
     large_text: string
@@ -25,8 +26,18 @@ export type DiscordActivity = {
   }
 }
 
+export type BuildOptions = {
+  previousRepo?: string | null
+  largeImage?: string
+  assetBase?: string
+}
+
 export const DEFAULT_LARGE_IMAGE =
   "https://raw.githubusercontent.com/stablyai/orca/main/resources/build/icon.png"
+
+/** Public PNGs Discord can fetch. Override with ORCA_PRESENCE_ASSET_BASE. */
+export const DEFAULT_ASSET_BASE =
+  "https://raw.githubusercontent.com/RedHatOnTop/orca-discord-presence/main/assets"
 
 const ATTENTION = new Set([
   "waiting",
@@ -77,31 +88,40 @@ export function roster(agents: AgentRow[]): string {
   return `${parts[0]} · ${parts[1]} · +${parts.length - 2}`
 }
 
-function primaryRepo(agents: AgentRow[]): string {
-  const ranked = countBy(agents.map((a) => a.repo || "workspace"))
-  return ranked[0]?.[0] ?? "Orca ADE"
+export function focusPool(snapshot: FleetSnapshot): AgentRow[] {
+  const waiting = snapshot.agents.filter((a) => classify(a.state) === "waiting")
+  if (waiting.length > 0) return waiting
+  const working = snapshot.agents.filter((a) => classify(a.state) === "working")
+  if (working.length > 0) return working
+  return snapshot.agents
 }
 
-function primaryBranch(agents: AgentRow[], repo: string): string | null {
-  const ranked = countBy(agents.map((a) => shortBranch(a.branch)).filter((b) => b.length > 0 && b !== repo))
+export function featuredRepo(agents: AgentRow[], previous: string | null | undefined): string {
+  const ranked = countBy(agents.map((a) => a.repo || "workspace"))
+  if (ranked.length === 0) return "Orca ADE"
+  if (previous && ranked.some(([name]) => name === previous)) return previous
+  return ranked[0][0]
+}
+
+function branchForRepo(agents: AgentRow[], repo: string): string | null {
+  const mine = agents.filter((a) => (a.repo || "workspace") === repo)
+  const ranked = countBy(mine.map((a) => shortBranch(a.branch)).filter((b) => b.length > 0 && b !== repo))
   return ranked[0]?.[0] ?? null
 }
 
-function extraRepoCount(agents: AgentRow[], repo: string): number {
-  return new Set(agents.map((a) => a.repo || "workspace")).size - (repo ? 1 : 0)
+function extraRepoCount(agents: AgentRow[]): number {
+  return Math.max(0, new Set(agents.map((a) => a.repo || "workspace")).size - 1)
 }
 
-function remoteHint(agents: AgentRow[]): string | null {
-  const remote = agents.find((a) => a.hostId && a.hostId !== "local")
-  return remote ? remote.hostId : null
+function remoteHint(agents: AgentRow[], repo: string): string | null {
+  const row = agents.find((a) => (a.repo || "workspace") === repo && a.hostId && a.hostId !== "local")
+  return row ? row.hostId : null
 }
 
-function whereLine(agents: AgentRow[]): string {
-  if (agents.length === 0) return "Orca ADE"
-  const repo = primaryRepo(agents)
-  const branch = primaryBranch(agents, repo)
-  const host = remoteHint(agents)
-  const extra = extraRepoCount(agents, repo)
+export function whereLine(agents: AgentRow[], repo: string): string {
+  const branch = branchForRepo(agents, repo)
+  const host = remoteHint(agents, repo)
+  const extra = extraRepoCount(agents)
   const parts = [repo]
   if (branch) parts.push(branch)
   if (host) parts.push(host)
@@ -109,10 +129,10 @@ function whereLine(agents: AgentRow[]): string {
   return parts.join(" · ")
 }
 
-const SMALL_KEY: Record<Kind, string> = {
-  waiting: "state-waiting",
-  working: "state-working",
-  idle: "state-idle"
+const SMALL_FILE: Record<Kind, string> = {
+  waiting: "state-waiting.png",
+  working: "state-working.png",
+  idle: "state-idle.png"
 }
 
 const SMALL_TEXT: Record<Kind, string> = {
@@ -121,10 +141,15 @@ const SMALL_TEXT: Record<Kind, string> = {
   idle: "idle"
 }
 
+function smallImage(kind: Kind, assetBase: string): string {
+  const base = assetBase.replace(/\/$/, "")
+  return `${base}/${SMALL_FILE[kind]}`
+}
+
 export function buildActivity(
   snapshot: FleetSnapshot,
   startedAtSec: number,
-  largeImage = DEFAULT_LARGE_IMAGE
+  options: BuildOptions = {}
 ): DiscordActivity | null {
   if (!snapshot.orcaRunning) return null
 
@@ -132,7 +157,11 @@ export function buildActivity(
   const working = snapshot.agents.filter((a) => classify(a.state) === "working")
   const live = [...waiting, ...working]
   const kind: Kind = waiting.length > 0 ? "waiting" : working.length > 0 ? "working" : "idle"
-  const place = whereLine(live.length > 0 ? live : snapshot.agents)
+  const focus = focusPool(snapshot)
+  const repo = featuredRepo(focus, options.previousRepo)
+  const place = whereLine(kind === "idle" ? snapshot.agents : live, repo)
+  const largeImage = options.largeImage ?? DEFAULT_LARGE_IMAGE
+  const assetBase = options.assetBase ?? DEFAULT_ASSET_BASE
 
   let details: string
   let state: string
@@ -159,10 +188,11 @@ export function buildActivity(
     details: clip(details),
     state: clip(state),
     timestamps: { start: startedAtSec },
+    status_display_type: 2,
     assets: {
       large_image: largeImage,
       large_text: clip(hoverBits.join(" · "), 128),
-      small_image: SMALL_KEY[kind],
+      small_image: smallImage(kind, assetBase),
       small_text: SMALL_TEXT[kind]
     }
   }

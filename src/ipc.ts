@@ -43,6 +43,7 @@ export class DiscordIpc {
 
   private readonly clientId: string
   private readonly pid: number
+  private pingTimer: ReturnType<typeof setInterval> | null = null
 
   constructor(clientId: string, pid = process.pid) {
     this.clientId = clientId
@@ -103,6 +104,7 @@ export class DiscordIpc {
                 this.socket = socket
                 this.decoder = decoder
                 this.attach(socket)
+                this.startPing(socket)
                 resolve()
                 return
               }
@@ -116,6 +118,25 @@ export class DiscordIpc {
         }
       })
     })
+  }
+
+  private startPing(socket: net.Socket): void {
+    this.stopPing()
+    this.pingTimer = setInterval(() => {
+      if (socket.destroyed) {
+        this.stopPing()
+        return
+      }
+      socket.write(encodeFrame(OPCODE.PING, {}))
+    }, 30_000)
+    this.pingTimer.unref()
+  }
+
+  private stopPing(): void {
+    if (this.pingTimer) {
+      clearInterval(this.pingTimer)
+      this.pingTimer = null
+    }
   }
 
   private attach(socket: net.Socket): void {
@@ -167,6 +188,7 @@ export class DiscordIpc {
   }
 
   close(): void {
+    this.stopPing()
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer)
       pending.reject(new Error("ipc closed"))
