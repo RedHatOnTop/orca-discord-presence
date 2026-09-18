@@ -1,0 +1,13 @@
+[Unit]
+Description=Orca ADE Discord Rich Presence (Vesktop/arRPC)
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/env node /home/person/Projects/distribution-project/orca-discord-presence/src/main.ts
+Restart=on-failure
+RestartSec=5
+Environment=ORCA_CLI=orca-ide
+
+[Install]
+WantedBy=default.target

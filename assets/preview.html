@@ -1,0 +1,47 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Orca presence preview</title>
+<style>
+  html, body { margin: 0; background: #0e0f12; font-family: "gg sans", "Noto Sans", "Segoe UI", sans-serif; }
+  .stage { width: 720px; padding: 48px; }
+  .card {
+    width: 300px;
+    background: #111214;
+    border-radius: 8px;
+    padding: 16px;
+    color: #f2f3f5;
+  }
+  .name { font-size: 16px; font-weight: 650; }
+  .playing { margin-top: 12px; font-size: 12px; font-weight: 700; letter-spacing: .02em; color: #b5bac1; text-transform: uppercase; }
+  .box { margin-top: 8px; display: flex; gap: 12px; align-items: center; }
+  .art { position: relative; width: 64px; height: 64px; flex: none; }
+  .art img.large { width: 64px; height: 64px; border-radius: 8px; display: block; }
+  .art img.small {
+    position: absolute; right: -4px; bottom: -4px;
+    width: 22px; height: 22px; border-radius: 50%;
+    border: 3px solid #111214; background: #0b1220;
+  }
+  .copy { min-width: 0; }
+  .app { font-size: 14px; font-weight: 650; }
+  .details, .state, .time { font-size: 13px; color: #b5bac1; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+</style>
+<body>
+  <div class="stage">
+    <div class="card">
+      <div class="name">you</div>
+      <div class="playing">Playing a game</div>
+      <div class="box">
+        <div class="art">
+          <img class="large" src="orca.png" alt="" />
+          <img class="small" src="state-working.png" alt="" />
+        </div>
+        <div class="copy">
+          <div class="app">Orca ADE</div>
+          <div class="details">3 live · grok</div>
+          <div class="state">remote-agent</div>
+          <div class="time">01:30:12 elapsed</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
