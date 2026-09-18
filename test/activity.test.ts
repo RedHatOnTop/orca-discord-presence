@@ -57,15 +57,15 @@ test("token usage takes the state line", () => {
   const activity = buildActivity(
     snap([row({ state: "working", agentType: "grok" })], {
       usage: [
-        { provider: "codex", label: "Codex", usedPercent: 100, kind: "session", resetDescription: "23:43" },
-        { provider: "grok", label: "Grok", usedPercent: 25, kind: "weekly", resetDescription: "Sun 12:40 AM" }
+        { provider: "codex", label: "Codex", totalTokens: 13261 },
+        { provider: "grok", label: "Grok", totalTokens: 43649991 }
       ]
     }),
     1
   )
   assert.ok(activity)
   assert.equal(activity.details, "1 · grok")
-  assert.equal(activity.state, "Codex 100% · Grok 25%")
+  assert.equal(activity.state, "Grok 43.6M · Codex 13k")
 })
 
 test("waiting still leads the details line", () => {
@@ -88,13 +88,13 @@ test("orca down clears presence", () => {
 test("idle Orca shows worktree count and still surfaces usage", () => {
   const activity = buildActivity(
     snap([row({ state: "inactive", agentType: "grok" })], {
-      usage: [{ provider: "codex", label: "Codex", usedPercent: 47, kind: "weekly", resetDescription: "" }]
+      usage: [{ provider: "codex", label: "Codex", totalTokens: 47000 }]
     }),
     1
   )
   assert.ok(activity)
   assert.equal(activity.details, "Idle · 8 worktrees")
-  assert.equal(activity.state, "Codex 47%")
+  assert.equal(activity.state, "Codex 47k")
   assert.equal(activity.assets.small_image, "state-idle")
 })
 

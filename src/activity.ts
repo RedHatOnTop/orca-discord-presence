@@ -1,4 +1,4 @@
-import type { UsageWindow } from "./usage.ts"
+import type { TokenTotal } from "./usage.ts"
 import { hostLine, usageLine } from "./usage.ts"
 
 export type AgentRow = {
@@ -13,7 +13,7 @@ export type FleetSnapshot = {
   orcaRunning: boolean
   agents: AgentRow[]
   worktreeCount: number
-  usage: UsageWindow[]
+  usage: TokenTotal[]
 }
 
 export type DiscordActivity = {

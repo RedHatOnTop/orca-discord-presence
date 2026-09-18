@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process"
 import type { AgentRow, FleetSnapshot } from "./activity.ts"
-import { parseRateLimits } from "./usage.ts"
+import { collectTodayTokens } from "./usage.ts"
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" ? (value as Record<string, unknown>) : null
@@ -153,10 +153,9 @@ async function settle<T>(promise: Promise<T>): Promise<T | null> {
 }
 
 export async function readFleet(cli: string): Promise<FleetSnapshot> {
-  const [localPs, envList, accounts] = await Promise.all([
+  const [localPs, envList] = await Promise.all([
     settle(runOrcaJson(cli, ["worktree", "ps", "--limit", "40", "--json"])),
-    settle(runOrcaJson(cli, ["environment", "list", "--json"])),
-    settle(runOrcaJson(cli, ["account", "list", "--json"]))
+    settle(runOrcaJson(cli, ["environment", "list", "--json"]))
   ])
   if (!localPs) return emptyFleet()
 
@@ -187,6 +186,6 @@ export async function readFleet(cli: string): Promise<FleetSnapshot> {
     orcaRunning: true,
     agents,
     worktreeCount,
-    usage: accounts ? parseRateLimits(accounts) : []
+    usage: collectTodayTokens()
   }
 }
