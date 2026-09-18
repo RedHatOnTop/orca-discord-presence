@@ -78,7 +78,7 @@ test("waiting still leads the details line", () => {
   )
   assert.ok(activity)
   assert.equal(activity.details, "2 · needs you · codex")
-  assert.match(activity.assets.small_image, /state-waiting\.png$/)
+  assert.equal(activity.assets.small_image, "state-waiting")
 })
 
 test("orca down clears presence", () => {
@@ -95,12 +95,20 @@ test("idle Orca shows worktree count and still surfaces usage", () => {
   assert.ok(activity)
   assert.equal(activity.details, "Idle · 8 worktrees")
   assert.equal(activity.state, "Codex 47%")
-  assert.match(activity.assets.small_image, /state-idle\.png$/)
+  assert.equal(activity.assets.small_image, "state-idle")
 })
 
-test("small image is a public HTTPS asset", () => {
+test("default assets are application keys Discord already hosts", () => {
   const activity = buildActivity(snap([row({ state: "working", agentType: "grok" })]), 1)
   assert.ok(activity)
-  assert.match(activity.assets.small_image, /^https:\/\/.*state-working\.png$/)
-  assert.equal(activity.status_display_type, 2)
+  assert.equal(activity.assets.small_image, "state-working")
+  assert.equal(activity.assets.large_image, "orca")
+})
+
+test("HTTPS assets only when an asset base is set", () => {
+  const activity = buildActivity(snap([row({ state: "working", agentType: "grok" })]), 1, {
+    assetBase: "https://example.test/assets"
+  })
+  assert.ok(activity)
+  assert.equal(activity.assets.small_image, "https://example.test/assets/state-working.png")
 })

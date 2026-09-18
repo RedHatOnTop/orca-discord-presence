@@ -1,10 +1,9 @@
-import { buildActivity, DEFAULT_ASSET_BASE, featuredRepo, focusPool } from "./activity.ts"
+import { buildActivity, featuredRepo, focusPool } from "./activity.ts"
 import { DiscordIpc } from "./ipc.ts"
 import { readFleet } from "./snapshot.ts"
 
 const DEFAULT_CLIENT_ID = "1545653843239374848"
 const POLL_MS = 15_000
-const HEARTBEAT_TICKS = 4
 
 function log(msg: string, extra?: unknown): void {
   const line = extra === undefined ? msg : `${msg} ${JSON.stringify(extra)}`
@@ -19,7 +18,7 @@ async function tick(
   ipc: DiscordIpc,
   cli: string,
   startedAt: number,
-  last: { current: unknown; repo: string | null; ticks: number },
+  last: { current: unknown; repo: string | null },
   assetBase: string
 ): Promise<void> {
   if (!ipc.connected) {
@@ -32,23 +31,25 @@ async function tick(
     previousRepo: last.repo,
     assetBase
   })
-  last.ticks += 1
-  const heartbeat = last.ticks % HEARTBEAT_TICKS === 0
-  if (!heartbeat && sameActivity(activity, last.current)) return
+  // Always republish. Vesktop arRPC clears presence when any other IPC
+  // client for this app id disconnects, and a skipped tick leaves a blank card.
   await ipc.setActivity(activity)
+  const changed = !sameActivity(activity, last.current)
   last.current = activity
   last.repo = activity ? featuredRepo(focusPool(fleet), last.repo) : null
-  log("presence", activity ? { details: activity.details, state: activity.state } : { details: null })
+  if (changed) {
+    log("presence", activity ? { details: activity.details, state: activity.state } : { details: null })
+  }
 }
 
 async function main(): Promise<void> {
   const once = process.argv.includes("--once")
   const clientId = process.env.ORCA_DISCORD_CLIENT_ID || DEFAULT_CLIENT_ID
   const cli = process.env.ORCA_CLI || "orca-ide"
-  const assetBase = process.env.ORCA_PRESENCE_ASSET_BASE || DEFAULT_ASSET_BASE
+  const assetBase = process.env.ORCA_PRESENCE_ASSET_BASE || ""
   const startedAt = Math.floor(Date.now() / 1000)
   const ipc = new DiscordIpc(clientId)
-  const last = { current: undefined as unknown, repo: null as string | null, ticks: 0 }
+  const last = { current: undefined as unknown, repo: null as string | null }
 
   const run = async () => {
     try {

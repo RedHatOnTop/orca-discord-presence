@@ -153,7 +153,11 @@ export class DiscordIpc {
             const pending = this.pending.get(frame.nonce)!
             clearTimeout(pending.timer)
             this.pending.delete(frame.nonce)
-            pending.resolve(data)
+            if (frame.evt === "ERROR") {
+              pending.reject(new Error(`SET_ACTIVITY error ${JSON.stringify(data)}`))
+            } else {
+              pending.resolve(data)
+            }
           }
         })
       } catch {

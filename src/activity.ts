@@ -21,7 +21,6 @@ export type DiscordActivity = {
   details: string
   state: string
   timestamps: { start: number }
-  status_display_type: number
   assets: {
     large_image: string
     large_text: string
@@ -132,10 +131,10 @@ export function whereLine(agents: AgentRow[], repo: string): string {
   return parts.join(" · ")
 }
 
-const SMALL_FILE: Record<Kind, string> = {
-  waiting: "state-waiting.png",
-  working: "state-working.png",
-  idle: "state-idle.png"
+const SMALL_KEY: Record<Kind, string> = {
+  waiting: "state-waiting",
+  working: "state-working",
+  idle: "state-idle"
 }
 
 const SMALL_TEXT: Record<Kind, string> = {
@@ -145,8 +144,9 @@ const SMALL_TEXT: Record<Kind, string> = {
 }
 
 function smallImage(kind: Kind, assetBase: string): string {
-  const base = assetBase.replace(/\/$/, "")
-  return `${base}/${SMALL_FILE[kind]}`
+  const key = SMALL_KEY[kind]
+  if (!assetBase) return key
+  return `${assetBase.replace(/\/$/, "")}/${key}.png`
 }
 
 export function buildActivity(
@@ -170,8 +170,8 @@ export function buildActivity(
   const usage = usageLine(snapshot.usage)
   const hostsText = hostLine(hosts)
   const place = whereLine(kind === "idle" ? snapshot.agents : live, repo)
-  const largeImage = options.largeImage ?? DEFAULT_LARGE_IMAGE
-  const assetBase = options.assetBase ?? DEFAULT_ASSET_BASE
+  const assetBase = options.assetBase ?? ""
+  const largeImage = options.largeImage ?? (assetBase ? DEFAULT_LARGE_IMAGE : "orca")
 
   let details: string
   if (kind === "waiting") {
@@ -194,10 +194,9 @@ export function buildActivity(
     details: clip(details),
     state: clip(state),
     timestamps: { start: startedAtSec },
-    status_display_type: 2,
     assets: {
       large_image: largeImage,
-      large_text: clip(hoverBits.join(" · "), 128),
+      large_text: clip(hoverBits.join(" · ") || "Orca ADE", 128),
       small_image: smallImage(kind, assetBase),
       small_text: SMALL_TEXT[kind]
     }
