@@ -88,8 +88,7 @@ export function roster(agents: AgentRow[]): string {
     n > 1 ? `${name} ×${n}` : name
   )
   if (parts.length === 0) return "agent"
-  if (parts.length <= 3) return parts.join(" · ")
-  return `${parts[0]} · ${parts[1]} · +${parts.length - 2}`
+  return parts.join(" · ")
 }
 
 export function focusPool(snapshot: FleetSnapshot): AgentRow[] {

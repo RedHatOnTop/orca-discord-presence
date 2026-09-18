@@ -7,7 +7,7 @@ export type UsageWindow = {
 }
 
 const LABELS: Record<string, string> = {
-  copilot: "Codex",
+  codex: "Codex",
   grok: "Grok",
   claude: "Claude",
   gemini: "Gemini",

@@ -8,7 +8,7 @@ test("parses session over weekly and skips unavailable providers", () => {
     result: {
       rateLimits: {
         claude: { provider: "claude", status: "unavailable", session: null, weekly: null },
-        copilot: {
+        codex: {
           provider: "codex",
           status: "ok",
           session: { usedPercent: 100, resetDescription: "23:43" },
