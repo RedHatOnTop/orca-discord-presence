@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process"
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
@@ -156,4 +157,110 @@ export function collectTodayTokens(
   if (grok > 0) out.push({ provider: "grok", label: "Grok", totalTokens: grok })
   if (copilot > 0) out.push({ provider: "codex", label: "Codex", totalTokens: copilot })
   return out.sort((a, b) => b.totalTokens - a.totalTokens)
+}
+
+export function mergeTokenTotals(groups: TokenTotal[][]): TokenTotal[] {
+  const map = new Map<string, TokenTotal>()
+  for (const group of groups) {
+    for (const row of group) {
+      const prev = map.get(row.provider)
+      if (prev) prev.totalTokens += row.totalTokens
+      else map.set(row.provider, { ...row })
+    }
+  }
+  return [...map.values()]
+    .filter((row) => row.totalTokens > 0)
+    .sort((a, b) => b.totalTokens - a.totalTokens || a.label.localeCompare(b.label))
+}
+
+const REMOTE_SCANNER = `
+import json, sys
+from pathlib import Path
+day = sys.argv[1]
+home = Path.home()
+
+def last_thread(path):
+    last = 0
+    try:
+        text = path.read_text(errors="ignore")
+    except Exception:
+        return 0
+    for line in text.splitlines():
+        if "token_usage_record" not in line:
+            continue
+        try:
+            data = json.loads(line)
+        except Exception:
+            continue
+        if data.get("type") != "token_usage_record":
+            continue
+        payload = data.get("payload") or {}
+        thread = payload.get("thread_token_usage") or payload.get("usage") or {}
+        n = thread.get("total_tokens")
+        if isinstance(n, (int, float)):
+            last = int(n)
+    return last
+
+def grok_sum():
+    total = 0
+    root = home / ".grok" / "sessions"
+    if not root.exists():
+        return 0
+    for path in root.rglob("usage.json"):
+        try:
+            data = json.loads(path.read_text())
+        except Exception:
+            continue
+        updated = str(data.get("updatedAt") or "")
+        if not updated.startswith(day):
+            continue
+        session = data.get("session") or {}
+        n = session.get("totalTokens")
+        if isinstance(n, (int, float)):
+            total += int(n)
+    return total
+
+n_codex = 0
+root = home / ".codex" / "sessions" / Path(*day.split("-"))
+if root.is_dir():
+    for path in root.glob("*.jsonl"):
+        n_codex += last_thread(path)
+print(json.dumps({"codex": n_codex, "grok": grok_sum()}))
+`
+
+export function collectHostTokens(host: string, day = localDay()): Promise<TokenTotal[]> {
+  if (!host || host === "local") return Promise.resolve([])
+  return new Promise((resolve) => {
+    const child = spawn(
+      "ssh",
+      ["-o", "ConnectTimeout=8", "-o", "BatchMode=yes", host, "python3", "-", day],
+      { stdio: ["pipe", "pipe", "pipe"] }
+    )
+    const stdout: Buffer[] = []
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL")
+      resolve([])
+    }, 12000)
+    child.stdin.write(REMOTE_SCANNER)
+    child.stdin.end()
+    child.stdout.on("data", (chunk) => stdout.push(chunk))
+    child.on("error", () => {
+      clearTimeout(timer)
+      resolve([])
+    })
+    child.on("close", () => {
+      clearTimeout(timer)
+      try {
+        const parsed = JSON.parse(Buffer.concat(stdout).toString("utf8")) as Record<string, unknown>
+        const out: TokenTotal[] = []
+        const nCodex = typeof parsed.codex === "number" ? parsed.codex : 0
+        const nGrok = typeof parsed.grok === "number" ? parsed.grok : 0
+        if (nCodex > 0) out.push({ provider: "codex", label: "Codex", totalTokens: nCodex })
+        if (nGrok > 0) out.push({ provider: "grok", label: "Grok", totalTokens: nGrok })
+        resolve(out)
+      } catch {
+        resolve([])
+      }
+    })
+  })
 }

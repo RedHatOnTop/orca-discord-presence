@@ -7,6 +7,7 @@ import {
   collectTodayTokens,
   formatTokens,
   localDay,
+  mergeTokenTotals,
   sumCodexTokens,
   sumGrokTokens,
   usageLine
@@ -73,6 +74,17 @@ test("sumCodexTokens uses last thread_token_usage per jsonl", () => {
   )
   assert.equal(sumCodexTokens(root, "2026-09-18"), 2500)
   assert.equal(sumCodexTokens(root, "2026-09-17"), 0)
+})
+
+test("mergeTokenTotals adds the same provider across hosts", () => {
+  const merged = mergeTokenTotals([
+    [{ provider: "grok", label: "Grok", totalTokens: 50_000_000 }],
+    [{ provider: "codex", label: "Codex", totalTokens: 12_000_000 }]
+  ])
+  assert.equal(merged.length, 2)
+  assert.equal(merged[0].label, "Grok")
+  assert.equal(merged[0].totalTokens, 50_000_000)
+  assert.equal(merged[1].totalTokens, 12_000_000)
 })
 
 test("collectTodayTokens reads grok and copilot homes", () => {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { inferAgentType, parseTerminals, parseWorktreePs } from "../src/snapshot.ts"
+import { inferAgentType, parseTerminals, parseWorktreePs, pickHostAgents } from "../src/snapshot.ts"
 
 test("parses orca worktree ps envelope", () => {
   const snap = parseWorktreePs({
@@ -48,6 +48,30 @@ test("inferAgentType ignores ssh shell titles", () => {
   assert.equal(inferAgentType("", "person@spectre: ~/wt/release-readiness-spectre"), null)
   assert.equal(inferAgentType("gemini", "◇ Gemini CLI"), "gemini")
   assert.equal(inferAgentType("", "⠋ Grok"), "grok")
+})
+
+test("remote terminals win over a partial worktree-ps agent list", () => {
+  const fromPs = parseWorktreePs(
+    { result: { worktrees: [{ repo: "x", agents: [{ state: "working", agentType: "codex" }] }] } },
+    "spectre"
+  ).agents
+  const fromTerms = parseTerminals(
+    {
+      result: {
+        terminals: [
+          { title: "◇ Gemini CLI", agentIdentity: "gemini", connected: true, worktreePath: "/work/a" },
+          { title: "표시", agentIdentity: "codex", connected: true, worktreePath: "/work/x" }
+        ]
+      }
+    },
+    "spectre"
+  )
+  const picked = pickHostAgents(fromPs, fromTerms)
+  assert.equal(picked.length, 2)
+  assert.deepEqual(
+    picked.map((a) => a.agentType).sort(),
+    ["codex", "gemini"]
+  )
 })
 
 test("parseTerminals keeps identified agents and drops shells", () => {

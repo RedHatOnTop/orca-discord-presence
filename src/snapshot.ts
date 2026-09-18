@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process"
 import type { AgentRow, FleetSnapshot } from "./activity.ts"
-import { collectTodayTokens } from "./usage.ts"
+import { collectHostTokens, collectTodayTokens, mergeTokenTotals } from "./usage.ts"
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" ? (value as Record<string, unknown>) : null
@@ -95,6 +95,11 @@ export function parseTerminals(payload: unknown, hostId: string): AgentRow[] {
   return agents
 }
 
+/** Remote worktree-ps often has one agent row while terminals hold the rest. Prefer terminals. */
+export function pickHostAgents(fromPs: AgentRow[], fromTerms: AgentRow[]): AgentRow[] {
+  return fromTerms.length > 0 ? fromTerms : fromPs
+}
+
 export function parseEnvironmentNames(payload: unknown): string[] {
   const root = asRecord(payload)
   const result = asRecord(root?.result) ?? root
@@ -171,21 +176,19 @@ export async function readFleet(cli: string): Promise<FleetSnapshot> {
       )
       const parsed = ps ? parseWorktreePs(ps, name) : { agents: [], worktreeCount: 0 }
       worktreeCount += parsed.worktreeCount
-      if (parsed.agents.length > 0) {
-        agents.push(...parsed.agents)
-        return
-      }
       const terms = await settle(
-        runOrcaJson(cli, ["terminal", "list", "--limit", "80", "--json", "--environment", name])
+        runOrcaJson(cli, ["terminal", "list", "--limit", "200", "--json", "--environment", name])
       )
-      if (terms) agents.push(...parseTerminals(terms, name))
+      const fromTerms = terms ? parseTerminals(terms, name) : []
+      agents.push(...pickHostAgents(parsed.agents, fromTerms))
     })
   )
 
+  const remoteUsage = await Promise.all(envNames.map((name) => collectHostTokens(name)))
   return {
     orcaRunning: true,
     agents,
     worktreeCount,
-    usage: collectTodayTokens()
+    usage: mergeTokenTotals([collectTodayTokens(), ...remoteUsage])
   }
 }
