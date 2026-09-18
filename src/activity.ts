@@ -1,3 +1,6 @@
+import type { UsageWindow } from "./usage.ts"
+import { hostLine, usageLine } from "./usage.ts"
+
 export type AgentRow = {
   state: string
   agentType: string
@@ -10,6 +13,7 @@ export type FleetSnapshot = {
   orcaRunning: boolean
   agents: AgentRow[]
   worktreeCount: number
+  usage: UsageWindow[]
 }
 
 export type DiscordActivity = {
@@ -159,28 +163,31 @@ export function buildActivity(
   const kind: Kind = waiting.length > 0 ? "waiting" : working.length > 0 ? "working" : "idle"
   const focus = focusPool(snapshot)
   const repo = featuredRepo(focus, options.previousRepo)
+  const hosts: Record<string, number> = {}
+  for (const agent of live.length > 0 ? live : snapshot.agents) {
+    const host = agent.hostId || "local"
+    hosts[host] = (hosts[host] ?? 0) + 1
+  }
+  const usage = usageLine(snapshot.usage)
+  const hostsText = hostLine(hosts)
   const place = whereLine(kind === "idle" ? snapshot.agents : live, repo)
   const largeImage = options.largeImage ?? DEFAULT_LARGE_IMAGE
   const assetBase = options.assetBase ?? DEFAULT_ASSET_BASE
 
   let details: string
-  let state: string
   if (kind === "waiting") {
-    details = `needs you · ${roster(waiting)}`
-    state = working.length > 0 ? `${place} · ${working.length} working` : place
+    details = `${live.length} · needs you · ${roster(waiting)}`
   } else if (kind === "working") {
-    details = roster(working)
-    state = place
+    details = `${live.length} · ${roster(live)}`
   } else {
     details = snapshot.worktreeCount > 1 ? `Idle · ${snapshot.worktreeCount} worktrees` : "Idle"
-    state = place
   }
+  const state = usage || hostsText || place
 
   const hoverBits = [
-    "Orca ADE",
-    working.length > 0 ? `${working.length} working` : null,
-    waiting.length > 0 ? `${waiting.length} waiting` : null,
-    snapshot.worktreeCount > 0 ? `${snapshot.worktreeCount} worktrees` : null
+    hostsText || null,
+    usage || null,
+    waiting.length > 0 ? `${waiting.length} waiting` : null
   ].filter((bit): bit is string => bit !== null)
 
   return {
