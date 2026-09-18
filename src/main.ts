@@ -17,7 +17,6 @@ function sameActivity(a: unknown, b: unknown): boolean {
 async function tick(
   ipc: DiscordIpc,
   cli: string,
-  startedAt: number,
   last: { current: unknown; repo: string | null },
   assetBase: string
 ): Promise<void> {
@@ -27,7 +26,7 @@ async function tick(
     last.current = undefined
   }
   const fleet = await readFleet(cli)
-  const activity = buildActivity(fleet, startedAt, {
+  const activity = buildActivity(fleet, {
     previousRepo: last.repo,
     assetBase
   })
@@ -47,13 +46,12 @@ async function main(): Promise<void> {
   const clientId = process.env.ORCA_DISCORD_CLIENT_ID || DEFAULT_CLIENT_ID
   const cli = process.env.ORCA_CLI || "orca-ide"
   const assetBase = process.env.ORCA_PRESENCE_ASSET_BASE || ""
-  const startedAt = Math.floor(Date.now() / 1000)
   const ipc = new DiscordIpc(clientId)
   const last = { current: undefined as unknown, repo: null as string | null }
 
   const run = async () => {
     try {
-      await tick(ipc, cli, startedAt, last, assetBase)
+      await tick(ipc, cli, last, assetBase)
     } catch (err) {
       ipc.close()
       log("tick failed", { err: err instanceof Error ? err.message : String(err) })

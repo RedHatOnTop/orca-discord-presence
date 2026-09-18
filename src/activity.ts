@@ -1,5 +1,5 @@
 import type { TokenTotal } from "./usage.ts"
-import { hostLine, usageLine } from "./usage.ts"
+import { hostLine, usageHover, usageLine } from "./usage.ts"
 
 export type AgentRow = {
   state: string
@@ -20,12 +20,9 @@ export type DiscordActivity = {
   type: number
   details: string
   state: string
-  timestamps: { start: number }
   assets: {
     large_image: string
     large_text: string
-    small_image: string
-    small_text: string
   }
 }
 
@@ -81,12 +78,31 @@ function countBy(values: string[]): [string, number][] {
   return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
 }
 
-/** `grok ×2 · copilot` — counts live in the string, so details can drop the extra "N live". */
+const AGENT_LABELS: Record<string, string> = {
+  codex: "Codex",
+  grok: "Grok",
+  gemini: "Gemini",
+  claude: "Claude",
+  deepseek: "DeepSeek",
+  qoder: "Qoder",
+  opencode: "OpenCode",
+  cursor: "Cursor",
+  copilot: "Copilot",
+  pi: "Pi"
+}
+
+export function agentLabel(type: string): string {
+  const key = type.trim().toLowerCase()
+  if (!key) return "Agent"
+  return AGENT_LABELS[key] ?? type.trim().replace(/^\w/, (c) => c.toUpperCase())
+}
+
+/** `2 Codex · Grok` — count only when it is not 1. */
 export function roster(agents: AgentRow[]): string {
-  const parts = countBy(agents.map((a) => a.agentType || "agent")).map(([name, n]) =>
-    n > 1 ? `${name} ×${n}` : name
+  const parts = countBy(agents.map((a) => agentLabel(a.agentType || "agent"))).map(([name, n]) =>
+    n > 1 ? `${n} ${name}` : name
   )
-  if (parts.length === 0) return "agent"
+  if (parts.length === 0) return "Agent"
   return parts.join(" · ")
 }
 
@@ -131,27 +147,8 @@ export function whereLine(agents: AgentRow[], repo: string): string {
   return parts.join(" · ")
 }
 
-const SMALL_KEY: Record<Kind, string> = {
-  waiting: "state-waiting",
-  working: "state-working",
-  idle: "state-idle"
-}
-
-const SMALL_TEXT: Record<Kind, string> = {
-  waiting: "needs you",
-  working: "working",
-  idle: "idle"
-}
-
-function smallImage(kind: Kind, assetBase: string): string {
-  const key = SMALL_KEY[kind]
-  if (!assetBase) return key
-  return `${assetBase.replace(/\/$/, "")}/${key}.png`
-}
-
 export function buildActivity(
   snapshot: FleetSnapshot,
-  startedAtSec: number,
   options: BuildOptions = {}
 ): DiscordActivity | null {
   if (!snapshot.orcaRunning) return null
@@ -167,7 +164,8 @@ export function buildActivity(
     const host = agent.hostId || "local"
     hosts[host] = (hosts[host] ?? 0) + 1
   }
-  const usage = usageLine(snapshot.usage)
+  const tokens = usageLine(snapshot.usage)
+  const tokenBits = usageHover(snapshot.usage)
   const hostsText = hostLine(hosts)
   const place = whereLine(kind === "idle" ? snapshot.agents : live, repo)
   const assetBase = options.assetBase ?? ""
@@ -175,17 +173,17 @@ export function buildActivity(
 
   let details: string
   if (kind === "waiting") {
-    details = `${live.length} · needs you · ${roster(waiting)}`
+    details = `Needs you · ${roster(waiting)}`
   } else if (kind === "working") {
-    details = `${live.length} · ${roster(live)}`
+    details = roster(live)
   } else {
     details = snapshot.worktreeCount > 1 ? `Idle · ${snapshot.worktreeCount} worktrees` : "Idle"
   }
-  const state = usage || hostsText || place
+  const state = tokens || hostsText || place
 
   const hoverBits = [
     hostsText || null,
-    usage || null,
+    tokenBits || null,
     waiting.length > 0 ? `${waiting.length} waiting` : null
   ].filter((bit): bit is string => bit !== null)
 
@@ -193,12 +191,9 @@ export function buildActivity(
     type: 0,
     details: clip(details),
     state: clip(state),
-    timestamps: { start: startedAtSec },
     assets: {
       large_image: largeImage,
-      large_text: clip(hoverBits.join(" · ") || "Orca ADE", 128),
-      small_image: smallImage(kind, assetBase),
-      small_text: SMALL_TEXT[kind]
+      large_text: clip(hoverBits.join(" · ") || "Orca ADE", 128)
     }
   }
 }

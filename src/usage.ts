@@ -40,6 +40,13 @@ export function formatTokens(n: number): string {
 }
 
 export function usageLine(totals: TokenTotal[]): string {
+  const live = totals.filter((row) => row.totalTokens > 0)
+  const sum = live.reduce((acc, row) => acc + row.totalTokens, 0)
+  if (sum <= 0) return ""
+  return `${formatTokens(sum)} tokens today`
+}
+
+export function usageHover(totals: TokenTotal[]): string {
   return totals
     .filter((row) => row.totalTokens > 0)
     .sort((a, b) => b.totalTokens - a.totalTokens || a.label.localeCompare(b.label))

@@ -20,13 +20,13 @@ test("formatTokens uses compact units", () => {
   assert.equal(formatTokens(900), "900")
 })
 
-test("usageLine is cumulative tokens not percents", () => {
+test("usageLine is a single today total", () => {
   assert.equal(
     usageLine([
       { provider: "codex", label: "Codex", totalTokens: 13261 },
       { provider: "grok", label: "Grok", totalTokens: 43649991 }
     ]),
-    "Grok 43.6M · Codex 13k"
+    "43.7M tokens today"
   )
 })
 
