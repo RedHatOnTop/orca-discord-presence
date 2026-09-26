@@ -8,6 +8,7 @@ ExecStart=/usr/bin/env node /home/person/Projects/distribution-project/orca-disc
 Restart=on-failure
 RestartSec=5
 Environment=ORCA_CLI=/home/person/.local/bin/orca-ide
+Environment=ORCA_PRESENCE_IDLE_CARD=/home/person/Projects/distribution-project/discord-profile/presence/idle-card.json
 
 [Install]
 WantedBy=default.target
