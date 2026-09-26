@@ -10,6 +10,7 @@ reads, cache writes, and output, the same measure as Codex total_tokens.
 
 import json
 import re
+import sqlite3
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -168,10 +169,159 @@ def grok(tally):
 
 # (id, label, scan, shared): shared ledgers can hold the same record on
 # several hosts, so their keys go out for a cross-host union.
+def varint(buf, pos):
+    shift = result = 0
+    while True:
+        byte = buf[pos]
+        pos += 1
+        result |= (byte & 0x7F) << shift
+        if not byte & 0x80:
+            return result, pos
+        shift += 7
+
+
+def proto_fields(buf):
+    """Top-level protobuf fields as {number: [values]}; nested messages stay bytes."""
+    out = {}
+    pos = 0
+    while pos < len(buf):
+        key, pos = varint(buf, pos)
+        wire = key & 7
+        if wire == 0:
+            value, pos = varint(buf, pos)
+        elif wire == 1:
+            value, pos = buf[pos:pos + 8], pos + 8
+        elif wire == 2:
+            size, pos = varint(buf, pos)
+            value, pos = buf[pos:pos + size], pos + size
+        elif wire == 5:
+            value, pos = buf[pos:pos + 4], pos + 4
+        else:
+            raise ValueError(f"unsupported wire type {wire}")
+        out.setdefault(key >> 3, []).append(value)
+    return out
+
+
+def changed_today(path):
+    """A WAL database can take new rows while the main file keeps its old mtime."""
+    wal = path.with_name(path.name + "-wal")
+    try:
+        latest = max(path.stat().st_mtime, wal.stat().st_mtime if wal.exists() else 0)
+    except OSError:
+        return False
+    return latest >= START
+
+
+def query(path, sql, params=()):
+    try:
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            return con.execute(sql, params).fetchall()
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return []
+
+
+# Antigravity keeps one SQLite file per conversation, written through a WAL.
+# steps.metadata: 1 = {1: start epoch seconds}, 9 = usage {2: uncached input,
+# 5: cached read, 4: cache write, 3: output incl. thinking, 11: response id}.
+AGY_FIELDS = (2, 5, 4, 3)
+
+
+def antigravity(tally):
+    for root in (HOME / ".gemini" / "antigravity-cli" / "conversations", HOME / ".gemini" / "antigravity" / "conversations"):
+        if not root.is_dir():
+            continue
+        for path in root.glob("*.db"):
+            if not changed_today(path):
+                continue
+            rows = query(path, "select metadata from steps where metadata is not null")
+            for (meta,) in rows:
+                try:
+                    top = proto_fields(meta)
+                    if 9 not in top or 1 not in top:
+                        continue
+                    usage = proto_fields(top[9][0])
+                    started = proto_fields(top[1][0])[1][0]
+                except (ValueError, IndexError, KeyError, TypeError):
+                    continue
+                if not in_window(float(started)):
+                    continue
+                response = usage.get(11, [None])[0]
+                tokens = sum(usage.get(f, [0])[0] for f in AGY_FIELDS)
+                tally.add(tokens, bytes(response) if response else None)
+
+
+# OpenCode and its MiMo fork store each assistant request as one message row,
+# updated in place; tokens.total already includes reasoning and cache.
+OPENCODE_SQL = (
+    "select id, json_extract(data, '$.tokens.total') from message"
+    " where time_created >= ? and time_created < ? and json_extract(data, '$.role') = 'assistant'"
+)
+
+
+def opencode_family(tally, databases):
+    window = (int(START * 1000), int(END * 1000))
+    for path in databases:
+        if not path.is_file() or not changed_today(path):
+            continue
+        sql = OPENCODE_SQL
+        if query(path, "select 1 from sqlite_master where type = 'table' and name = 'external_import'"):
+            # MiMo imports Claude Code transcripts; those are counted under Claude.
+            sql += " and session_id not in (select session_id from external_import)"
+        for message_id, total in query(path, sql, window):
+            if isinstance(total, (int, float)):
+                tally.add(total, message_id)
+
+
+def opencode(tally):
+    opencode_family(tally, [HOME / ".local" / "share" / "opencode" / "opencode.db"])
+
+
+def mimo(tally):
+    opencode_family(tally, [
+        HOME / ".config" / "orca" / "mimocode-hooks" / "shared" / "data" / "mimocode.db",
+        HOME / ".local" / "share" / "mimocode" / "mimocode.db",
+    ])
+
+
+KIMI_FIELDS = ("inputOther", "inputCacheRead", "inputCacheCreation", "output")
+
+
+def kimi(tally):
+    for path in touched(HOME / ".kimi-code" / "sessions", "wire.jsonl"):
+        for row in json_lines(path, '"usage.record"'):
+            if row.get("type") != "usage.record" or not in_window(epoch(row.get("time"))):
+                continue
+            usage = row.get("usage") or {}
+            tally.add(sum(num(usage.get(f)) for f in KIMI_FIELDS))
+
+
+def cline(tally):
+    # A resumed session copies earlier messages verbatim, so ids dedupe them.
+    for path in touched(HOME / ".cline" / "data" / "sessions", "*.messages.json"):
+        data = json_file(path)
+        messages = data.get("messages") if isinstance(data, dict) else data
+        for message in messages if isinstance(messages, list) else []:
+            if not isinstance(message, dict):
+                continue
+            metrics = message.get("metrics")
+            if not isinstance(metrics, dict) or not in_window(epoch(message.get("ts"))):
+                continue
+            tokens = num(metrics.get("inputTokens")) + num(metrics.get("cacheWriteTokens")) + num(metrics.get("outputTokens"))
+            tally.add(tokens, message.get("id"))
+
+
 HARNESSES = [
     ("claude", "Claude", claude, False),
     ("codex", "Codex", codex, True),
     ("grok", "Grok", grok, False),
+    ("antigravity", "Antigravity", antigravity, False),
+    ("opencode", "OpenCode", opencode, False),
+    ("mimo", "MiMo", mimo, False),
+    ("kimi", "Kimi", kimi, False),
+    ("cline", "Cline", cline, False),
 ]
 
 

@@ -13,6 +13,24 @@ Now one stdlib Python scanner (`scanner/tokens.py`) runs on every host: directly
 - Claude writes one line per content block, and early lines carry partial `output_tokens` (226 of 1,634 responses on 2026-09-26). Each `message.id` + `requestId` keeps its largest value.
 - `codex-handoff` copies rollouts between hosts (two shared sessions in the last two weeks), so Codex records go out keyed and are unioned across hosts.
 - Rollouts from older Codex builds carry only cumulative `token_count` events; their deltas are billed at the event time.
+- Every installed harness with a ledger is read. Local: Claude, Codex, Grok, Antigravity, OpenCode, MiMo, Kimi, Cline. Spectre: Claude, Codex (its Cline has never written usage).
+  - Antigravity: one SQLite file per conversation, `steps.metadata` protobuf. Field 1.1 is the start time, field 9 the usage (2 uncached input, 5 cached read, 4 cache write, 3 output incl. thinking, 11 response id). The WAL file's mtime counts as a change.
+  - OpenCode and MiMo: `message` rows, `tokens.total` (already includes reasoning and cache). MiMo imports Claude Code transcripts into its own database; sessions listed in `external_import` are skipped so Claude is not counted twice.
+  - Kimi: `usage.record` lines in `wire.jsonl`; `inputOther + inputCacheRead + inputCacheCreation + output`.
+  - Cline: `*.messages.json` messages with `metrics`; `inputTokens` already includes cached reads. A resumed session copies earlier messages, so ids dedupe them. `cacheWriteTokens` is always 0 in the data, so whether it is inside `inputTokens` is unverified.
+- Qoder (both hosts) and Kiro write token fields but every value is 0; they meter credits only. They are not counted.
 - Scans are reused for 60 seconds. A failed scan keeps the last good result from the same day; midnight starts fresh.
 
-Verified: the scanner equals the independent Claude count on this host (166,830,738 / 1,353 responses) and matches Spectre to within one in-flight response; Codex equals the per-request sum (4,056,837). `npm test` 42 passed.
+Verified against counts computed separately from the raw files, on days that have records:
+
+| Day | Harness | Tokens |
+| --- | --- | --- |
+| 2026-09-26 | Claude, this host | 166,830,738 (1,353 responses) |
+| 2026-09-26 | Codex | 4,056,837 |
+| 2026-09-20 | Antigravity | 77,467 |
+| 2026-09-22 | OpenCode / MiMo | 62,194 / 50,477,052 |
+| 2026-09-23 | MiMo | 6,231,322 |
+| 2026-08-26 | Kimi / Cline / OpenCode | 20,720,037 / 90,883 / 1,040,108 |
+| 2026-09-15 | Cline | 146,982,157 |
+
+Spectre Claude matched to within one in-flight response. A full scan takes 0.5 s here and 1.6 s over ssh. `npm test` 47 passed.
