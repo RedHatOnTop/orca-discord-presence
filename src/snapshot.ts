@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process"
 import type { AgentRow, FleetSnapshot } from "./activity.ts"
-import { collectHostTokens, collectTodayTokens, mergeTokenTotals } from "./usage.ts"
+import { collectTokens, mergeScans } from "./usage.ts"
+import type { HostScan } from "./usage.ts"
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" ? (value as Record<string, unknown>) : null
@@ -184,11 +185,11 @@ export async function readFleet(cli: string): Promise<FleetSnapshot> {
     })
   )
 
-  const remoteUsage = await Promise.all(envNames.map((name) => collectHostTokens(name)))
+  const scans = await Promise.all(["local", ...envNames].map((host) => collectTokens(host)))
   return {
     orcaRunning: true,
     agents,
     worktreeCount,
-    usage: mergeTokenTotals([collectTodayTokens(), ...remoteUsage])
+    usage: mergeScans(scans.filter((scan): scan is HostScan => scan !== null))
   }
 }
