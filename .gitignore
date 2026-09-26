@@ -1,3 +1,4 @@
 node_modules/
 *.log
 preview.png
+__pycache__/

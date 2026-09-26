@@ -1,17 +1,6 @@
 import assert from "node:assert/strict"
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
 import { test } from "node:test"
-import {
-  collectTodayTokens,
-  formatTokens,
-  localDay,
-  mergeTokenTotals,
-  sumCodexTokens,
-  sumGrokTokens,
-  usageLine
-} from "../src/usage.ts"
+import { dayWindow, formatTokens, mergeScans, parseScan, usageLine } from "../src/usage.ts"
 
 test("formatTokens uses compact units", () => {
   assert.equal(formatTokens(43649991), "43.6M")
@@ -31,87 +20,40 @@ test("usageLine is a single today total", () => {
   )
 })
 
-test("sumGrokTokens only counts sessions updated that local day", () => {
-  const root = mkdtempSync(join(tmpdir(), "grok-usage-"))
-  const a = join(root, "a")
-  const b = join(root, "b")
-  mkdirSync(a)
-  mkdirSync(b)
-  writeFileSync(
-    join(a, "usage.json"),
-    JSON.stringify({
-      updatedAt: "2026-09-18T14:22:12.000Z",
-      session: { totalTokens: 1000 }
-    })
-  )
-  writeFileSync(
-    join(b, "usage.json"),
-    JSON.stringify({
-      updatedAt: "2026-09-17T14:22:12.000Z",
-      session: { totalTokens: 999999 }
-    })
-  )
-  const day = localDay(new Date("2026-09-18T14:22:12.000Z"))
-  assert.equal(sumGrokTokens(root, day), 1000)
+test("dayWindow runs from local midnight to the next local midnight", () => {
+  const [start, end] = dayWindow(new Date(2026, 8, 26, 21, 30))
+  assert.equal(start, new Date(2026, 8, 26).getTime() / 1000)
+  assert.equal(end, new Date(2026, 8, 27).getTime() / 1000)
 })
 
-test("sumCodexTokens uses last thread_token_usage per jsonl", () => {
-  const root = mkdtempSync(join(tmpdir(), "codex-usage-"))
-  const dir = join(root, "2026", "09", "18")
-  mkdirSync(dir, { recursive: true })
-  writeFileSync(
-    join(dir, "rollout.jsonl"),
-    [
-      JSON.stringify({
-        type: "token_usage_record",
-        payload: { thread_token_usage: { total_tokens: 10 } }
-      }),
-      JSON.stringify({
-        type: "token_usage_record",
-        payload: { thread_token_usage: { total_tokens: 2500 } }
-      })
-    ].join("\n")
-  )
-  assert.equal(sumCodexTokens(root, "2026-09-18"), 2500)
-  assert.equal(sumCodexTokens(root, "2026-09-17"), 0)
-})
-
-test("mergeTokenTotals adds the same provider across hosts", () => {
-  const merged = mergeTokenTotals([
-    [{ provider: "grok", label: "Grok", totalTokens: 50_000_000 }],
-    [{ provider: "codex", label: "Codex", totalTokens: 12_000_000 }]
+test("mergeScans sums hosts but counts a copied record once", () => {
+  const merged = mergeScans([
+    {
+      totals: [
+        { harness: "claude", label: "Claude", tokens: 100, records: 1 },
+        { harness: "codex", label: "Codex", tokens: 30, records: 2, keyed: { "codex:a": 10, "codex:b": 20 } }
+      ],
+      errors: []
+    },
+    {
+      totals: [
+        { harness: "claude", label: "Claude", tokens: 50, records: 1 },
+        { harness: "codex", label: "Codex", tokens: 25, records: 2, keyed: { "codex:b": 20, "codex:c": 5 } }
+      ],
+      errors: []
+    }
   ])
-  assert.equal(merged.length, 2)
-  assert.equal(merged[0].label, "Grok")
-  assert.equal(merged[0].totalTokens, 50_000_000)
-  assert.equal(merged[1].totalTokens, 12_000_000)
+  assert.deepEqual(merged, [
+    { provider: "claude", label: "Claude", totalTokens: 150 },
+    { provider: "codex", label: "Codex", totalTokens: 35 }
+  ])
 })
 
-test("collectTodayTokens reads grok and copilot homes", () => {
-  const home = mkdtempSync(join(tmpdir(), "token-home-"))
-  const grokDir = join(home, ".grok", "sessions", "proj")
-  const copexDir = join(home, ".codex", "sessions", "2026", "09", "18")
-  mkdirSync(grokDir, { recursive: true })
-  mkdirSync(copexDir, { recursive: true })
-  writeFileSync(
-    join(grokDir, "usage.json"),
-    JSON.stringify({
-      updatedAt: "2026-09-18T01:00:00.000Z",
-      session: { totalTokens: 2_000_000 }
-    })
-  )
-  writeFileSync(
-    join(copexDir, "a.jsonl"),
-    JSON.stringify({
-      type: "token_usage_record",
-      payload: { thread_token_usage: { total_tokens: 4000 } }
-    })
-  )
-  const rows = collectTodayTokens(home, "2026-09-18")
-  assert.deepEqual(
-    rows.map((r) => r.label),
-    ["Grok", "Codex"]
-  )
-  assert.equal(rows[0].totalTokens, 2_000_000)
-  assert.equal(rows[1].totalTokens, 4000)
+test("parseScan rejects output that is not a scan", () => {
+  assert.equal(parseScan("Traceback (most recent call last):"), null)
+  assert.equal(parseScan('{"nope":1}'), null)
+  assert.deepEqual(parseScan('{"totals":[{"harness":"grok","label":"Grok","tokens":7,"records":1}],"errors":[]}'), {
+    totals: [{ harness: "grok", label: "Grok", tokens: 7, records: 1 }],
+    errors: []
+  })
 })
