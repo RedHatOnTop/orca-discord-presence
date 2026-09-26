@@ -18,11 +18,14 @@ export type FleetSnapshot = {
 
 export type DiscordActivity = {
   type: number
+  name: string
   details: string
   state: string
   assets: {
     large_image: string
     large_text: string
+    small_image: string
+    small_text: string
   }
 }
 
@@ -31,6 +34,9 @@ export type BuildOptions = {
   largeImage?: string
   assetBase?: string
 }
+
+/** arRPC keeps a supplied name; the official client still shows the application name. */
+export const CARD_NAME = "Orca ADE"
 
 export const DEFAULT_LARGE_IMAGE =
   "https://raw.githubusercontent.com/stablyai/orca/main/resources/build/icon.png"
@@ -50,6 +56,7 @@ const ATTENTION = new Set([
 ])
 
 const WORKING = new Set(["working", "running", "active", "streaming"])
+const BLOCKED = new Set(["blocked", "error", "failed"])
 
 export type Kind = "waiting" | "working" | "idle"
 
@@ -58,6 +65,15 @@ export function classify(state: string): Kind {
   if (ATTENTION.has(s) || s.includes("wait") || s.includes("need")) return "waiting"
   if (WORKING.has(s)) return "working"
   return "idle"
+}
+
+function statusBadge(agents: AgentRow[], kind: Kind): { image: string; text: string } {
+  if (agents.some((agent) => BLOCKED.has(agent.state.trim().toLowerCase()))) {
+    return { image: "state-blocked", text: "Agent blocked" }
+  }
+  if (kind === "waiting") return { image: "state-waiting", text: "Waiting for input" }
+  if (kind === "working") return { image: "state-working", text: "Agents working" }
+  return { image: "state-idle", text: "No active agents" }
 }
 
 function clip(value: string, max = 128): string {
@@ -170,6 +186,9 @@ export function buildActivity(
   const place = whereLine(kind === "idle" ? snapshot.agents : live, repo)
   const assetBase = options.assetBase ?? ""
   const largeImage = options.largeImage ?? (assetBase ? DEFAULT_LARGE_IMAGE : "orca")
+  const badge = statusBadge(snapshot.agents, kind)
+  // The borrowed application's own state-* keys are whale art, so badges always load our ring PNGs by URL.
+  const smallImage = `${(assetBase || DEFAULT_ASSET_BASE).replace(/\/+$/, "")}/${badge.image}.png`
 
   let details: string
   if (kind === "waiting") {
@@ -189,11 +208,14 @@ export function buildActivity(
 
   return {
     type: 0,
+    name: CARD_NAME,
     details: clip(details),
     state: clip(state),
     assets: {
       large_image: largeImage,
-      large_text: clip(hoverBits.join(" · ") || "Orca ADE", 128)
+      large_text: clip(hoverBits.join(" · ") || "Orca ADE", 128),
+      small_image: smallImage,
+      small_text: badge.text
     }
   }
 }
